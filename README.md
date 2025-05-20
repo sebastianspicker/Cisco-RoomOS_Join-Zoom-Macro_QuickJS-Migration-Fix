@@ -11,7 +11,8 @@
 Beginning with **RoomOS 11.28** Cisco replaced the legacy Duktape runtime with QuickJS to provide full ES-module support.  
 All Node/CommonJS compatibility shims (`module`, `exports`, `require`, `__filename`, …) were dropped.
 
-The original *Join-Zoom 4-1-1* macro suite (and many other community macros) still contain lines such as:
+The original *[*Join-Zoom 4-1-1*](https://github.com/CiscoDevNet/roomdevices-macros-samples/tree/master/Join%20Zoom%20with%20DTMF%20Zoom%20Tools)
+ macro suite (and many other community macros) still contain lines such as:
 
 ```js
 mem.localScript = module.name;
