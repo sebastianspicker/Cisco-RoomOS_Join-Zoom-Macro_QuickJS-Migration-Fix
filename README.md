@@ -1,7 +1,7 @@
 # Join-Zoom Macro · QuickJS Migration Fix  
 **Resolve the `ReferenceError: 'module' is not defined` error on Cisco RoomOS 11.28 +**
 
-## 1 · Background
+## Background
 
 | RoomOS build | Macro engine | Module system | CommonJS globals (`module`, `require`, …) |
 |--------------|--------------|---------------|-------------------------------------------|
@@ -24,21 +24,21 @@ QuickJS does not recognise `module`, so the macro fails to compile and RoomOS lo
 ReferenceError: 'module' is not defined
 ```
 
-## 2 · Symptoms
+## Symptoms
 
 * **Macros stop at start-up** – the console shows the error above.
 * No *Join Zoom* button, *Zoom Tools* panel or Zoom dial-strings are available.
 * Older codecs (≤ RoomOS 11.27) still work – the issue appears only after the firmware upgrade.
 
-## 3 · Root Cause
+## Root Cause
 
 `module.name` was a Duktape convenience that returned the current file name.
 In proper ES Modules the equivalent information lives in **`import.meta.url`**.
 Failing to migrate that single call breaks every macro that touches it.
 
-## 4 · The Fix
+## The Fix
 
-### 4.1 · Universal replacement snippet
+### Universal replacement snippet
 
 ```js
 /* Sets mem.localScript in every firmware version */
@@ -48,7 +48,7 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
   || 'UnknownScript';                                           // final fallback
 ```
 
-### 4.2 · Files you must patch
+### Files you must patch
 
 | File                     | Lines to change                                                                                                                                  |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -56,7 +56,7 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
 | `JoinZoom_Main_4-1-1.js` | 1. replace the combined `import { mem } … module.name` line<br>2. change `mem.remove.global(module.name)` → `mem.remove.global(mem.localScript)` |
 | Any other custom macro   | Search for **`module.name`** and replace it exactly the same way                                                                                 |
 
-### 4.3 · Step-by-step
+### Step-by-step
 
 1. **Macro Editor → Memory\_Functions.js**
 
@@ -75,9 +75,7 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
 
 5. **Verify** – the console should no longer display the ReferenceError and the Join-Zoom UI should load.
 
----
-
-## 5 · Compatibility Matrix
+## Compatibility Matrix
 
 | Firmware                         | Patched macros | Result                                               |
 | -------------------------------- | -------------- | ---------------------------------------------------- |
@@ -85,9 +83,7 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
 | RoomOS 11.28 … current (QuickJS) | ✅              | Works – uses `import.meta.url`                       |
 | Any firmware                     | ❌ (old code)   | Fails with `ReferenceError: 'module' is not defined` |
 
----
-
-## 6 · Optional – Let *Memory\_Functions* patch imports automatically
+## Optional – Let *Memory\_Functions* patch imports automatically
 
 If you enable
 
@@ -107,7 +103,7 @@ mem.localScript = …   // ES-module version
 into every macro that still lacks it.
 You still need to **manually delete any hard-coded `module.name`** inside those files – the auto-import only adds, it does not rewrite existing lines.
 
-## 7 · FAQ
+## FAQ
 
 ### “Couldn’t we just re-enable the old engine?”
 
@@ -123,7 +119,7 @@ to fall back to Duktape. Cisco marks this switch as **deprecated** and it will d
 
 No. The snippet keeps the legacy path (`module.name`) for devices that still run the old firmware.
 
-## 8 · Credits
+## Credits
 
 * **Robert McGonigle Jr** — original Join-Zoom macros
 * **Zacharie Gignac** — Memory Functions utility
