@@ -48,6 +48,24 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
   || 'UnknownScript';                                           // final fallback
 ```
 
+### Optional – Avoid cross-macro race conditions (recommended)
+
+If multiple macros use `Memory_Functions` at the same time, a shared `mem.localScript`
+value can be overwritten between async calls. Newer versions of this repo therefore
+include a scoped API:
+
+```js
+import { mem, localScriptNameFrom } from './Memory_Functions';
+
+const localScriptName = localScriptNameFrom({
+  importMetaUrl: (typeof import.meta !== 'undefined' && import.meta.url) ? import.meta.url : undefined,
+  moduleName: (typeof module !== 'undefined' && module.name) ? module.name : undefined
+});
+
+const localMem = mem.for(localScriptName);
+// use localMem.read/write/remove instead of mem.read/write/remove
+```
+
 ### Files you must patch
 
 | File                     | Lines to change                                                                                                                                  |
@@ -97,7 +115,7 @@ const config = {
 
 ```js
 import { mem } from './Memory_Functions';
-mem.localScript = …   // ES-module version
+mem.localScript = …   // universal ES-module + legacy fallback
 ```
 
 into every macro that still lacks it.

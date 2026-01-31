@@ -70,18 +70,17 @@
  ***********************************************/
 
 import xapi from 'xapi';
-import { config, sleep, checkRegex, findDTMF, sendDTMF, dialZoom, formSIP, handleDualScreen } from './JoinZoom_Config_4-1-1'
+import { config, sleep, checkRegex, findDTMF, sendDTMF, dialZoom, handleDualScreen } from './JoinZoom_Config_4-1-1'
 import { page } from './JoinZoom_JoinText_4-1-1'
-import { mem } from './Memory_Functions';
+import { mem, localScriptNameFrom } from './Memory_Functions';
 
-/* ------------------------------------------------------------
-   QuickJS (RoomOS ≥ 11.28) hat kein `module` mehr.
-   Wir ermitteln den Dateinamen deshalb via `import.meta.url`;
-   auf älteren Firmwares (Duktape) greifen wir weiter auf
-   `module.name` zurück.                                  */
-mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
-  ? import.meta.url.split('/').pop().replace(/\.js$/i, '')
-  : (typeof module !== 'undefined' && module.name) || 'JoinZoom_Main_4-1-1';
+const localScriptName = localScriptNameFrom({
+  importMetaUrl: (typeof import.meta !== 'undefined' && import.meta.url) ? import.meta.url : undefined,
+  moduleName: (typeof module !== 'undefined' && module.name) ? module.name : undefined,
+  fallbackName: 'JoinZoom_Main_4-1-1'
+});
+
+const localMem = mem.for(localScriptName);
 
 let meetingInfo = {
     meetingid: '',
@@ -109,16 +108,16 @@ async function init() {
     }
     message.Init['PersonalMode'] = {}
     if (config.ui.settings.personalMode) {
-        await mem.read(btoa('PMIInfo')).then((result) => {
+        await localMem.read(btoa('PMIInfo')).then((result) => {
             message.Init.PersonalMode['Enabled'] = true;
             let isSet = 0;
-            if (result[btoa('MeetingId')] == '' || [btoa('MeetingId')] == undefined) {
+            if (result[btoa('MeetingId')] === '' || result[btoa('MeetingId')] === undefined) {
                 isSet++
             }
-            if (result[btoa('Passcode')] == '' || [btoa('Passcode')] == undefined) {
+            if (result[btoa('Passcode')] === '' || result[btoa('Passcode')] === undefined) {
                 isSet++
             }
-            if (result[btoa('HostKey')] == '' || [btoa('HostKey')] == undefined) {
+            if (result[btoa('HostKey')] === '' || result[btoa('HostKey')] === undefined) {
                 isSet++
             }
             console.log(isSet)
@@ -129,7 +128,7 @@ async function init() {
             }
         }).catch((e) => {
             console.debug(e)
-            return mem.write(btoa('PMIInfo'), pmiInfo).then(() => {
+            return localMem.write(btoa('PMIInfo'), pmiInfo).then(() => {
                 message.Init.PersonalMode['Enabled'] = true;
                 message.Init.PersonalMode['isSet?'] = false;
             })
@@ -138,7 +137,7 @@ async function init() {
         await sleep().then(() => {
             message.Init.PersonalMode['Enabled'] = false;
             message.Init.PersonalMode['isSet?'] = false;
-            mem.remove.global(mem.localScript).then(() => {
+            mem.remove.global(localScriptName).then(() => {
 
             }).catch((e) => {
                 console.debug(e)
@@ -171,7 +170,7 @@ function zoomToolsVisibility(visibility) {
 
 function detectCall() {
     xapi.status.once('Call RemoteNumber', (remoteNumber) => {
-        xapi.event.once('CallSuccessful', (call) => {
+        xapi.event.once('CallSuccessful', () => {
             let verifyZoom = config.regex.zoom_SIP.any.test(remoteNumber)
             if (verifyZoom) {
                 zoomToolsVisibility('Auto');
@@ -186,7 +185,7 @@ function detectCall() {
     })
 }
 
-xapi.event.on('CallDisconnect', (info) => {
+xapi.event.on('CallDisconnect', () => {
     meetingInfo = {
         meetingid: '',
         passcode: '',
@@ -206,8 +205,6 @@ xapi.event.on('CallDisconnect', (info) => {
                     CallHistoryId: result.Entry[0].CallHistoryId,
                     DeleteConsecutiveDuplicates: 'True'
                 })
-            } else {
-
             }
         });
     }
@@ -227,7 +224,7 @@ xapi.event.on('UserInterface Extensions Panel Clicked', (event) => {
                         role: ''
                     }
                     if (config.ui.settings.personalMode) {
-                        mem.read(btoa('PMIInfo')).then((response) => {
+                        localMem.read(btoa('PMIInfo')).then((response) => {
                             let pmiInfo = {
                                 "TWVldGluZ0lk": response["TWVldGluZ0lk"],
                                 "UGFzc2NvZGU=": response["UGFzc2NvZGU="],
@@ -298,6 +295,7 @@ xapi.event.on('UserInterface Extensions Panel Clicked', (event) => {
                     })
                     break;
             }
+            break;
         default:
             break;
     }
@@ -422,14 +420,14 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                 switch (page.type) {
                     case 'opr':
                     case 'err':
-                        mem.read(btoa('PMIInfo')).then((response) => {
+                        localMem.read(btoa('PMIInfo')).then((response) => {
                             pmiInfo = {
                                 "TWVldGluZ0lk": btoa(event.Text),
                                 "UGFzc2NvZGU=": response["UGFzc2NvZGU="],
                                 "SG9zdEtleQ==": response["SG9zdEtleQ=="]
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
-                            mem.write(btoa('PMIInfo'), pmiInfo)
+                            localMem.write(btoa('PMIInfo'), pmiInfo)
                         })
                         break;
                 }
@@ -438,14 +436,14 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                 switch (page.type) {
                     case 'opr':
                     case 'err':
-                        mem.read(btoa('PMIInfo')).then((response) => {
+                        localMem.read(btoa('PMIInfo')).then((response) => {
                             pmiInfo = {
                                 "TWVldGluZ0lk": response["TWVldGluZ0lk"],
                                 "UGFzc2NvZGU=": btoa(event.Text),
                                 "SG9zdEtleQ==": response["SG9zdEtleQ=="]
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
-                            mem.write(btoa('PMIInfo'), pmiInfo)
+                            localMem.write(btoa('PMIInfo'), pmiInfo)
                         })
                         break;
                 }
@@ -454,14 +452,14 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                 switch (page.type) {
                     case 'opr':
                     case 'err':
-                        mem.read(btoa('PMIInfo')).then((response) => {
+                        localMem.read(btoa('PMIInfo')).then((response) => {
                             pmiInfo = {
                                 "TWVldGluZ0lk": response["TWVldGluZ0lk"],
                                 "UGFzc2NvZGU=": response["UGFzc2NvZGU="],
                                 "SG9zdEtleQ==": btoa(event.Text)
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
-                            mem.write(btoa('PMIInfo'), pmiInfo)
+                            localMem.write(btoa('PMIInfo'), pmiInfo)
                         })
                         break;
                 }
@@ -655,7 +653,7 @@ xapi.event.on('Userinterface Extensions Widget Action', (event) => {
                 break;
             //Personal Mode
             case 'joinZoom~4-1-1~Style_New+Personal~HostKey~CallPersonalZoom':
-                mem.read(btoa('PMIInfo')).then((result) => {
+                localMem.read(btoa('PMIInfo')).then((result) => {
                     meetingInfo = {
                         meetingid: result[btoa('MeetingId')],
                         passcode: result[btoa('Passcode')],

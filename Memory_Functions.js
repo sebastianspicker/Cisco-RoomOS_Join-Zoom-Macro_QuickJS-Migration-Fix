@@ -37,37 +37,68 @@ const mem = {};                 // **globale zentrale Ablage** für alle Funktio
 /* ------------------------------------------------------------------ */
 /*  2)   PATCH: localScript-Namen FESTLEGEN (RoomOS ≥ 11.28)          */
 /* ------------------------------------------------------------------ */
+function localScriptNameFrom ({ importMetaUrl, moduleName, fallbackName }) {
+  if (importMetaUrl) {
+    const lastPathSegment = String(importMetaUrl).split('/').pop();
+    if (lastPathSegment) {
+      return lastPathSegment.replace(/\.js$/i, '');
+    }
+  }
+
+  if (moduleName) return String(moduleName);
+
+  return fallbackName || 'UnknownScript';
+}
+
 (function applyLocalScriptName () {
+  const importMetaUrl = (typeof import.meta !== 'undefined' && import.meta.url)
+    ? import.meta.url
+    : undefined;
 
-  /* QuickJS / ES-Module (RoomOS 11.28 ff.) */
-  if (typeof import.meta !== 'undefined' && import.meta.url) {
-    mem.localScript = import.meta.url.split('/').pop().replace(/\.js$/i, '');
-    return;
-  }
+  const moduleName = (typeof module !== 'undefined' && module.name)
+    ? module.name
+    : undefined;
 
-  /* Ältere Firmware mit CommonJS-Shim */
-  if (typeof module !== 'undefined' && module.name) {
-    mem.localScript = module.name;
-    return;
-  }
-
-  /* Fallback (sollte praktisch nie greifen) */
-  mem.localScript = 'Memory_Functions';
+  mem.localScript = localScriptNameFrom({
+    importMetaUrl,
+    moduleName,
+    fallbackName: 'Memory_Functions'
+  });
 })();
+
+function parseStoreFromMacroContent (content) {
+  const start = String(content || '').indexOf('{');
+  if (start < 0) {
+    throw new Error('Memory store parse error: no opening "{" found.');
+  }
+
+  const jsonText = String(content).slice(start).replace(/;?\s*$/, '');
+  return JSON.parse(jsonText);
+}
+
+function getStore () {
+  return xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
+    .then((e) => parseStoreFromMacroContent(e.Macro[0].Content));
+}
+
+function saveStore (store) {
+  return xapi.Command.Macros.Macro.Save(
+    { Name: config.storageMacro },
+    `var memory = ${JSON.stringify(store, null, 4)};`
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  3)   INITIALISIERUNG DES STORAGE-MACROS                           */
 /* ------------------------------------------------------------------ */
 function memoryInit () {
-  return new Promise((resolve) => {
+  /*  Prüfen, ob das Storage-Macro bereits existiert  */
+  return xapi.Command.Macros.Macro.Get({ Name: config.storageMacro })
+    .then(() => undefined)                   // vorhanden → fertig
+    .catch(() => {                           // nicht vorhanden → anlegen
+      console.warn(`No storage macro found, creating "${config.storageMacro}" ...`);
 
-    /*  Prüfen, ob das Storage-Macro bereits existiert  */
-    xapi.Command.Macros.Macro.Get({ Name: config.storageMacro })
-      .then(() => resolve())                   // vorhanden → fertig
-      .catch(() => {                           // nicht vorhanden → anlegen
-        console.warn(`No storage macro found, creating "${config.storageMacro}" ...`);
-
-        const initialContent =
+      const initialContent =
 `var memory = {
     "./_$Info": {
         "Warning": "Do NOT modify this document, as other Scripts/Macros may rely on this information",
@@ -90,11 +121,9 @@ function memoryInit () {
     "ExampleKey": "Example Value"
 }`;
 
-        return xapi.Command.Macros.Macro.Save({ Name: config.storageMacro }, initialContent)
-          .then(() => mem.print.global());
-      })
-      .finally(resolve);
-  });
+      return xapi.Command.Macros.Macro.Save({ Name: config.storageMacro }, initialContent)
+        .then(() => mem.print.global());
+    });
 }
 
 /* ------------------------------------------------------------------ */
@@ -109,69 +138,67 @@ const importTemplate =
 import { mem } from './Memory_Functions';
 
 mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
-  ? import.meta.url.split('/').pop().replace(/\\.js$/i, '')
-  : 'Unknown';
+  ? import.meta.url.split('/').pop().replace(/\\.js$/i, '')      // QuickJS / ES Modules
+  : (typeof module !== 'undefined' && module.name)              // legacy Duktape
+  || 'UnknownScript';                                           // final fallback
 
 `;
 
 function importMem () {
-  return new Promise((resolve) => {
+  return xapi.Command.Macros.Macro.Get({ Content: 'True' })
+    .then((macroList) => {
 
-    xapi.Command.Macros.Macro.Get({ Content: 'True' })
-      .then((macroList) => {
+      /* Regex erkennt bereits vorhandene Imports bzw. localScript-Setzung */
+      const importRegex =
+        /(\s*import\s+xapi\s+from\s+'xapi'(?:;|\s*)(?:\n|\r)*)?(\s*import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'(?:;|\s*)(?:\n|\r)*)?(\s*mem\.localScript\s*=.*(?:;|\s*))?/;
 
-        /* Regex erkennt bereits vorhandene Imports bzw. localScript-Setzung */
-        const importRegex =
-          /(\s*import\s+xapi\s+from\s+'xapi'(?:;|\s*)(?:\n|\r)*)?(\s*import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'(?:;|\s*)(?:\n|\r)*)?(\s*mem\.localScript\s*=.*(?:;|\s*))?/;
+      macroList.Macro.forEach((m) => {
 
-        macroList.Macro.forEach((m) => {
+        const hasXapi   = /\s*import\s+xapi\s+from\s+'xapi'/.test(m.Content);
+        const hasMemImp = /import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'/.test(m.Content);
+        const hasLocal  = /mem\.localScript\s*=/.test(m.Content);
 
-          const hasXapi   = /\s*import\s+xapi\s+from\s+'xapi'/.test(m.Content);
-          const hasMemImp = /import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'/.test(m.Content);
-          const hasLocal  = /mem\.localScript\s*=/.test(m.Content);
+        const needsPatch = !(hasXapi && hasMemImp && hasLocal);
 
-          const needsPatch = !(hasXapi && hasMemImp && hasLocal);
+        /*   Das eigene Storage-/Utility-Macro NIE patchen,
+             sonst droht Rekursion.                                */
+        if (!needsPatch ||
+            m.Name === 'Memory_Functions' ||
+            m.Name === config.storageMacro) {
+          return;
+        }
 
-          /*   Das eigene Storage-/Utility-Macro NIE patchen,
-               sonst droht Rekursion.                                */
-          if (!needsPatch ||
-              m.Name === 'Memory_Functions' ||
-              m.Name === config.storageMacro) {
-            return;
+        /*  Entscheidung nach autoImport-Modus  */
+        const doPatch = (() => {
+          switch (config.autoImport.mode) {
+            case true:
+            case 'true':
+              return true;                                         // immer
+            case false:
+            case 'false':
+              return false;                                        // nie
+            case 'activeOnly':
+              return m.Active === 'True';
+            case 'custom':
+              return config.autoImport.customImport.includes(m.Name);
+            case 'customActive':
+              return m.Active === 'True' &&
+                     config.autoImport.customImport.includes(m.Name);
+            default:
+              console.error(`Configuration Error: autoImport.mode "${config.autoImport.mode}" unknown – defaulting to "false".`);
+              return false;
           }
+        })();
 
-          /*  Entscheidung nach autoImport-Modus  */
-          const doPatch = (() => {
-            switch (config.autoImport.mode) {
-              case true:
-              case 'true':
-                return true;                                         // immer
-              case false:
-              case 'false':
-                return false;                                        // nie
-              case 'activeOnly':
-                return m.Active === 'True';
-              case 'custom':
-                return config.autoImport.customImport.includes(m.Name);
-              case 'customActive':
-                return m.Active === 'True' &&
-                       config.autoImport.customImport.includes(m.Name);
-              default:
-                console.error(`Configuration Error: autoImport.mode "${config.autoImport.mode}" unknown – defaulting to "false".`);
-                return false;
-            }
-          })();
+        if (!doPatch) { return; }
 
-          if (!doPatch) { return; }
-
-          /*  Patch einfügen  */
-          const newContent = m.Content.replace(importRegex, importTemplate);
-          console.log(`Added mem-import to macro "${m.Name}".`);
-          xapi.Command.Macros.Macro.Save({ Name: m.Name }, newContent);
-        });
-      })
-      .finally(resolve);
-  });
+        /*  Patch einfügen  */
+        const newContent = m.Content.replace(importRegex, importTemplate);
+        console.log(`Added mem-import to macro "${m.Name}".`);
+        xapi.Command.Macros.Macro.Save({ Name: m.Name }, newContent);
+      });
+    })
+    .catch((e) => console.error(e));
 }
 
 /* ------------------------------------------------------------------ */
@@ -179,63 +206,33 @@ function importMem () {
 /* ------------------------------------------------------------------ */
 
 mem.read = (key) => new Promise((resolve, reject) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const raw   = e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{');
-      const store = JSON.parse(raw);
-      const scope = store[mem.localScript] || {};
-
-      if (key in scope) {
-        resolve(scope[key]);
-      } else {
-        reject(new Error(`Local Read Error – key "${key}" not found in "${mem.localScript}".`));
-      }
-    });
+  mem.read.scoped(key, undefined).then(resolve).catch(reject);
 });
 
 mem.read.global = (key) => new Promise((resolve, reject) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const raw   = e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{');
-      const store = JSON.parse(raw);
-
-      if (key in store) {
+  getStore()
+    .then((store) => {
+      if (Object.prototype.hasOwnProperty.call(store, key)) {
         resolve(store[key]);
-      } else {
-        reject(new Error(`Global Read Error – key "${key}" not found.`));
+        return;
       }
-    });
+      reject(new Error(`Global Read Error – key "${key}" not found.`));
+    })
+    .catch(reject);
 });
 
 mem.write = (key, value) => new Promise((resolve) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const store = JSON.parse(e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{'));
-      const scope = store[mem.localScript] || {};
-      scope[key]  = value;
-      store[mem.localScript] = scope;
-
-      return xapi.Command.Macros.Macro.Save(
-        { Name: config.storageMacro },
-        `var memory = ${JSON.stringify(store, null, 4)}`
-      );
-    })
+  mem.write.scoped(key, value, undefined)
     .then(() => {
-      console.debug(`Local Write: [${mem.localScript}] ${key} = ${value}`);
       resolve(value);
     });
 });
 
 mem.write.global = (key, value) => new Promise((resolve) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const store = JSON.parse(e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{'));
-      store[key]  = value;
-
-      return xapi.Command.Macros.Macro.Save(
-        { Name: config.storageMacro },
-        `var memory = ${JSON.stringify(store, null, 4)}`
-      );
+  getStore()
+    .then((store) => {
+      store[key] = value;
+      return saveStore(store);
     })
     .then(() => {
       console.debug(`Global Write: ${key} = ${value}`);
@@ -244,36 +241,13 @@ mem.write.global = (key, value) => new Promise((resolve) => {
 });
 
 mem.remove = (key) => new Promise((resolve, reject) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const store = JSON.parse(e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{'));
-      const scope = store[mem.localScript] || {};
-
-      if (!(key in scope)) {
-        reject(new Error(`Local Delete Error – key "${key}" not found.`));
-        return;
-      }
-
-      const oldVal = scope[key];
-      delete scope[key];
-      store[mem.localScript] = scope;
-
-      xapi.Command.Macros.Macro.Save(
-        { Name: config.storageMacro },
-        `var memory = ${JSON.stringify(store)}`
-      ).then(() => {
-        console.warn(`Local key "${key}" (${oldVal}) deleted from ${mem.localScript}.`);
-        resolve(key);
-      });
-    });
+  mem.remove.scoped(key, undefined).then(resolve).catch(reject);
 });
 
 mem.remove.global = (key) => new Promise((resolve, reject) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const store = JSON.parse(e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{'));
-
-      if (!(key in store)) {
+  getStore()
+    .then((store) => {
+      if (!Object.prototype.hasOwnProperty.call(store, key)) {
         reject(new Error(`Global Delete Error – key "${key}" not found.`));
         return;
       }
@@ -281,34 +255,116 @@ mem.remove.global = (key) => new Promise((resolve, reject) => {
       const oldVal = store[key];
       delete store[key];
 
-      xapi.Command.Macros.Macro.Save(
-        { Name: config.storageMacro },
-        `var memory = ${JSON.stringify(store, null, 4)}`
-      ).then(() => {
+      return saveStore(store).then(() => {
         console.warn(`Global key "${key}" (${oldVal}) deleted.`);
         resolve(key);
       });
-    });
-});
-
-mem.print = () => new Promise((resolve, reject) => {
-  mem.read.global(mem.localScript)
-    .then((data) => { console.log(data); resolve(data); })
+    })
     .catch(reject);
 });
 
+mem.print = () => new Promise((resolve, reject) => {
+  mem.print.scoped(undefined).then(resolve).catch(reject);
+});
+
 mem.print.global = () => new Promise((resolve) => {
-  xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => {
-      const store = JSON.parse(e.Macro[0].Content.replace(/var.*memory.*=\s*{/, '{'));
-      console.log(store);
-      resolve(store);
-    });
+  getStore().then((store) => {
+    console.log(store);
+    resolve(store);
+  });
 });
 
 mem.info = () => {
   mem.read.global('./_$Info').then(console.log);
 };
+
+/* ------------------------------------------------------------------ */
+/*  5.1) SCOPED API (vermeidet race conditions zwischen Makros)        */
+/* ------------------------------------------------------------------ */
+
+mem.for = (scopeName) => ({
+  read: (key) => mem.read.scoped(key, scopeName),
+  write: (key, value) => mem.write.scoped(key, value, scopeName),
+  remove: (key) => mem.remove.scoped(key, scopeName),
+  print: () => mem.print.scoped(scopeName),
+  readGlobal: mem.read.global,
+  writeGlobal: mem.write.global,
+  removeGlobal: mem.remove.global,
+  printGlobal: mem.print.global,
+  info: mem.info
+});
+
+mem.read.scoped = (key, scopeName) => new Promise((resolve, reject) => {
+  const scopeKey = scopeName || mem.localScript;
+
+  getStore()
+    .then((store) => {
+      const scope = (store && typeof store[scopeKey] === 'object' && store[scopeKey] !== null)
+        ? store[scopeKey]
+        : {};
+
+      if (Object.prototype.hasOwnProperty.call(scope, key)) {
+        resolve(scope[key]);
+        return;
+      }
+
+      reject(new Error(`Local Read Error – key "${key}" not found in "${scopeKey}".`));
+    })
+    .catch(reject);
+});
+
+mem.write.scoped = (key, value, scopeName) => new Promise((resolve, reject) => {
+  const scopeKey = scopeName || mem.localScript;
+
+  getStore()
+    .then((store) => {
+      const scope = (store && typeof store[scopeKey] === 'object' && store[scopeKey] !== null)
+        ? store[scopeKey]
+        : {};
+
+      scope[key] = value;
+      store[scopeKey] = scope;
+
+      return saveStore(store).then(() => {
+        console.debug(`Local Write: [${scopeKey}] ${key} = ${value}`);
+        resolve(value);
+      });
+    })
+    .catch(reject);
+});
+
+mem.remove.scoped = (key, scopeName) => new Promise((resolve, reject) => {
+  const scopeKey = scopeName || mem.localScript;
+
+  getStore()
+    .then((store) => {
+      const scope = (store && typeof store[scopeKey] === 'object' && store[scopeKey] !== null)
+        ? store[scopeKey]
+        : {};
+
+      if (!Object.prototype.hasOwnProperty.call(scope, key)) {
+        reject(new Error(`Local Delete Error – key "${key}" not found in "${scopeKey}".`));
+        return;
+      }
+
+      const oldVal = scope[key];
+      delete scope[key];
+      store[scopeKey] = scope;
+
+      return saveStore(store).then(() => {
+        console.warn(`Local key "${key}" (${oldVal}) deleted from ${scopeKey}.`);
+        resolve(key);
+      });
+    })
+    .catch(reject);
+});
+
+mem.print.scoped = (scopeName) => new Promise((resolve, reject) => {
+  const scopeKey = scopeName || mem.localScript;
+  mem.read.global(scopeKey)
+    .then((data) => { console.log(data); resolve(data); })
+    .catch(reject);
+});
 
 /* ------------------------------------------------------------------ */
 /*  6)   INITIAL STARTUP SEQUENCE                                     */
@@ -320,4 +376,4 @@ memoryInit()
 /* ------------------------------------------------------------------ */
 /*  7)   EXPORT                                                       */
 /* ------------------------------------------------------------------ */
-export { mem };
+export { mem, localScriptNameFrom };
