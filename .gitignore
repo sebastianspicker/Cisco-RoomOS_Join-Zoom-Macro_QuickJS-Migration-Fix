@@ -9,11 +9,16 @@ pnpm-debug.log*
 .eslintcache
 *.log
 coverage/
+.nyc_output/
 dist/
 build/
 out/
 .cache/
 .parcel-cache/
+artifacts/
+test-results/
+junit.xml
+junit-*.xml
 .env
 .env.*
 !.env.example
