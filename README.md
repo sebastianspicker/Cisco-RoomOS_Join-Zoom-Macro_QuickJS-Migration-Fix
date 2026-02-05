@@ -1,44 +1,33 @@
-# Join-Zoom Macro · QuickJS Migration Fix  
-**Resolve the `ReferenceError: 'module' is not defined` error on Cisco RoomOS 11.28 +**
+# Join-Zoom Macro · QuickJS Migration Fix
 
-## Background
+Resolve the `ReferenceError: 'module' is not defined` error on Cisco RoomOS 11.28+ by migrating legacy macros to ES Modules.
 
-| RoomOS build | Macro engine | Module system | CommonJS globals (`module`, `require`, …) |
-|--------------|--------------|---------------|-------------------------------------------|
-| **≤ 11.27**  | Duktape      | CommonJS-shim | *Available* (in every script)             |
-| **≥ 11.28**  | QuickJS      | **Native ES Modules** | **Removed**                               |
+## Overview
 
-Beginning with **RoomOS 11.28** Cisco replaced the legacy Duktape runtime with QuickJS to provide full ES-module support.  
-All Node/CommonJS compatibility shims (`module`, `exports`, `require`, `__filename`, …) were dropped.
+RoomOS 11.28 replaced the legacy Duktape runtime with QuickJS and removed CommonJS globals (`module`, `exports`, `require`, `__filename`, ...). Legacy macros that call `module.name` fail to load. This repo provides a safe, backward-compatible fix and a patched `Memory_Functions.js` for Join Zoom 4-1-1.
 
-The original *[*Join-Zoom 4-1-1*](https://github.com/CiscoDevNet/roomdevices-macros-samples/tree/master/Join%20Zoom%20with%20DTMF%20Zoom%20Tools)
- macro suite (and many other community macros) still contain lines such as:
+## Features
 
-```js
-mem.localScript = module.name;
-````
+- Works on RoomOS ≤ 11.27 (Duktape) and ≥ 11.28 (QuickJS).
+- Universal replacement for `module.name` using `import.meta.url`.
+- Optional scoped memory API to avoid cross-macro race conditions.
+- Offline linting and tests via a local `xapi` stub.
 
-QuickJS does not recognise `module`, so the macro fails to compile and RoomOS logs:
+## Requirements
 
-```
-ReferenceError: 'module' is not defined
-```
+- Cisco RoomOS macros environment for deployment.
+- Node.js 18+ for local lint/test.
+- Companion macros `JoinZoom_Config_4-1-1` and `JoinZoom_JoinText_4-1-1` (not included here).
 
-## Symptoms
+## Quickstart
 
-* **Macros stop at start-up** – the console shows the error above.
-* No *Join Zoom* button, *Zoom Tools* panel or Zoom dial-strings are available.
-* Older codecs (≤ RoomOS 11.27) still work – the issue appears only after the firmware upgrade.
+1. Open Macro Editor and update `Memory_Functions.js` using the snippet below.
+2. Update `JoinZoom_Main_4-1-1.js` to use the new memory helper.
+3. Search all macros for `module.name` and replace with the universal snippet.
+4. Restart all macros.
+5. Verify the UI loads and no `ReferenceError` appears in logs.
 
-## Root Cause
-
-`module.name` was a Duktape convenience that returned the current file name.
-In proper ES Modules the equivalent information lives in **`import.meta.url`**.
-Failing to migrate that single call breaks every macro that touches it.
-
-## The Fix
-
-### Universal replacement snippet
+## Universal replacement snippet
 
 ```js
 /* Sets mem.localScript in every firmware version */
@@ -48,11 +37,9 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
   || 'UnknownScript';                                           // final fallback
 ```
 
-### Optional – Avoid cross-macro race conditions (recommended)
+## Optional: scoped memory API (recommended)
 
-If multiple macros use `Memory_Functions` at the same time, a shared `mem.localScript`
-value can be overwritten between async calls. Newer versions of this repo therefore
-include a scoped API:
+When multiple macros run concurrently, a shared `mem.localScript` can be overwritten. Use a scoped instance:
 
 ```js
 import { mem, localScriptNameFrom } from './Memory_Functions';
@@ -66,84 +53,85 @@ const localMem = mem.for(localScriptName);
 // use localMem.read/write/remove instead of mem.read/write/remove
 ```
 
-### Files you must patch
+## Required companion macros (not included in this repo)
 
-| File                     | Lines to change                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Memory_Functions.js`    | remove the old assignment, insert the snippet                                                                                                    |
-| `JoinZoom_Main_4-1-1.js` | 1. replace the combined `import { mem } … module.name` line<br>2. change `mem.remove.global(module.name)` → `mem.remove.global(mem.localScript)` |
-| Any other custom macro   | Search for **`module.name`** and replace it exactly the same way                                                                                 |
+`JoinZoom_Main_4-1-1.js` depends on two macros that are not bundled here:
 
-### Step-by-step
+- `JoinZoom_Config_4-1-1`
+- `JoinZoom_JoinText_4-1-1`
 
-1. **Macro Editor → Memory\_Functions.js**
+These are part of the original Cisco DevNet Join Zoom macro suite. Download them from the same source as the original macro bundle before deploying. Without them, `JoinZoom_Main_4-1-1.js` will fail to load.
 
-   * Delete `mem.localScript = module.name;`
-   * Paste the replacement snippet shown above.
+## Files to patch
 
-2. **Macro Editor → JoinZoom\_Main\_4-1-1.js**
+| File                     | Changes |
+| ------------------------ | ------- |
+| `Memory_Functions.js`    | Remove `mem.localScript = module.name;` and insert the universal snippet. |
+| `JoinZoom_Main_4-1-1.js` | Replace the combined import + `module.name` usage; update `mem.remove.global(module.name)` to use `mem.localScript`. |
+| Any other macro          | Replace all `module.name` references with the universal snippet. |
 
-   * Split the import line and insert the snippet.
-   * Update the single `mem.remove.global(module.name)` call.
+## Compatibility matrix
 
-3. **Search the rest of your macros** (`Ctrl/⌘ + F → module.name`).
-   Apply the same change wherever it appears.
+| Firmware                         | Patched macros | Result |
+| -------------------------------- | -------------- | ------ |
+| RoomOS ≤ 11.27 (Duktape)         | ✅              | Works (falls back to `module.name`) |
+| RoomOS 11.28+ (QuickJS)          | ✅              | Works (uses `import.meta.url`) |
+| Any firmware                     | ❌              | Fails with `ReferenceError` |
 
-4. **Save all files** → *Macros › Restart all*.
+## Configuration
 
-5. **Verify** – the console should no longer display the ReferenceError and the Join-Zoom UI should load.
+- `Memory_Functions.js` supports `config.autoImport` to inject required imports into other macros.
+- `JoinZoom_Main_4-1-1.js` configuration lives in `JoinZoom_Config_4-1-1` (external).
 
-## Compatibility Matrix
+## Development
 
-| Firmware                         | Patched macros | Result                                               |
-| -------------------------------- | -------------- | ---------------------------------------------------- |
-| RoomOS ≤ 11.27 (Duktape)         | ✅              | Works – falls back to `module.name`                  |
-| RoomOS 11.28 … current (QuickJS) | ✅              | Works – uses `import.meta.url`                       |
-| Any firmware                     | ❌ (old code)   | Fails with `ReferenceError: 'module' is not defined` |
+Install dependencies:
 
-## Optional – Let *Memory\_Functions* patch imports automatically
-
-If you enable
-
-```js
-const config = {
-  autoImport: { mode: true }   // or "activeOnly" / "custom" / "customActive"
-}
+```bash
+npm ci
 ```
 
-`Memory_Functions.js` will automatically inject
+Lint:
 
-```js
-import { mem } from './Memory_Functions';
-mem.localScript = …   // universal ES-module + legacy fallback
+```bash
+npm run lint
 ```
 
-into every macro that still lacks it.
-You still need to **manually delete any hard-coded `module.name`** inside those files – the auto-import only adds, it does not rewrite existing lines.
+Run tests:
 
-## FAQ
-
-### “Couldn’t we just re-enable the old engine?”
-
-RoomOS offers the setting
-
-```
-xConfiguration Macros QuickJSEngine Off
+```bash
+npm test
 ```
 
-to fall back to Duktape. Cisco marks this switch as **deprecated** and it will disappear in a future release. Migrating now is safer and future-proof.
+Full local smoke (lint + tests):
 
-### “Will this break older codecs?”
+```bash
+npm run smoke
+```
 
-No. The snippet keeps the legacy path (`module.name`) for devices that still run the old firmware.
+## Testing
+
+- Unit tests cover `Memory_Functions.js` behavior via the local `xapi` stub.
+- Join Zoom UI/flow tests are deferred because required companion macros are not in this repo.
+
+## Security
+
+- CI runs a basic secret scan, `npm audit`, and CodeQL SAST.
+- Do not log or paste sensitive values (meeting IDs, host keys, phone numbers).
+- Report vulnerabilities via `SECURITY.md`.
+
+## Troubleshooting
+
+- `ReferenceError: 'module' is not defined`: ensure the universal snippet replaced all `module.name` references.
+- `JoinZoom_Main_4-1-1.js` fails to load: install the companion macros listed above.
+- Tests fail with `xapi` errors: run `npm ci` so the local `xapi` stub is installed.
 
 ## Credits
 
-* **Robert McGonigle Jr** — original Join-Zoom macros
-* **Zacharie Gignac** — Memory Functions utility
-* Migration patch & README by  **Sebastian J. Spicker** (May 2025)
+- Robert McGonigle Jr — original Join-Zoom macros
+- Zacharie Gignac — Memory Functions utility
+- Migration patch & README by Sebastian J. Spicker (May 2025)
 
-## 9 · License
+## License
 
-This documentation follows the same license as the original project.
-See [LICENSE](./LICENSE) for details.
+This documentation follows the same license as the original project. See `LICENSE` for details.

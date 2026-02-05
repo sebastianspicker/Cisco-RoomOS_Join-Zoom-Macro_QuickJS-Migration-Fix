@@ -152,6 +152,8 @@ function importMem () {
       const importRegex =
         /(\s*import\s+xapi\s+from\s+'xapi'(?:;|\s*)(?:\n|\r)*)?(\s*import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'(?:;|\s*)(?:\n|\r)*)?(\s*mem\.localScript\s*=.*(?:;|\s*))?/;
 
+      const savePromises = [];
+
       macroList.Macro.forEach((m) => {
 
         const hasXapi   = /\s*import\s+xapi\s+from\s+'xapi'/.test(m.Content);
@@ -194,9 +196,15 @@ function importMem () {
 
         /*  Patch einfügen  */
         const newContent = m.Content.replace(importRegex, importTemplate);
-        console.log(`Added mem-import to macro "${m.Name}".`);
-        xapi.Command.Macros.Macro.Save({ Name: m.Name }, newContent);
+        savePromises.push(
+          xapi.Command.Macros.Macro.Save({ Name: m.Name }, newContent)
+            .then(() => {
+              console.log(`Added mem-import to macro "${m.Name}".`);
+            })
+        );
       });
+
+      return Promise.all(savePromises);
     })
     .catch((e) => console.error(e));
 }
@@ -376,4 +384,4 @@ memoryInit()
 /* ------------------------------------------------------------------ */
 /*  7)   EXPORT                                                       */
 /* ------------------------------------------------------------------ */
-export { mem, localScriptNameFrom };
+export { mem, localScriptNameFrom, importMem, config };

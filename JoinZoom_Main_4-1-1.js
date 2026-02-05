@@ -197,10 +197,8 @@ xapi.event.on('CallDisconnect', () => {
         xapi.command('CallHistory Get', {
 
         }).then((result) => {
-            console.log(result.Entry[0])
             let temp = result.Entry[0].CallbackNumber.split('@');
             if (temp[1] == 'lej.zmeu.us') {
-                console.log(true)
                 xapi.command('CallHistory DeleteEntry', {
                     CallHistoryId: result.Entry[0].CallHistoryId,
                     DeleteConsecutiveDuplicates: 'True'
@@ -584,7 +582,7 @@ xapi.event.on('Userinterface Extensions Widget Action', (event) => {
     if (event.Type == 'released') {
         findDTMF(event.WidgetId).then((result) => {
             if (result.source == 'zoomTools') {
-                console.log(`"${result.nickName}" released, Entering DTMF: *${result.dtmfSequence}`)
+                console.debug(`"${result.nickName}" released, entering DTMF.`)
                 switch (config.ui.settings.dtmfFeedback.mode) {
                     case 'On':
                         sendDTMF.normal(result.dtmfSequence);

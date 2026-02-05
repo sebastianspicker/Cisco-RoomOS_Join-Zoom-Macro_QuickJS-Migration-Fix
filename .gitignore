@@ -1,4 +1,27 @@
 node_modules/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
 .DS_Store
+.eslintcache
+*.log
+coverage/
+dist/
+build/
+out/
+.cache/
+.parcel-cache/
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
 
+# docs (local findings/logs/decisions)
+DECISIONS.md
+FINDINGS.md
+LOG.md
+REFACTOR_PLAN.md
