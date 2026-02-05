@@ -4,6 +4,9 @@ Workflows
 - `CI` runs lint, unit tests, a basic secret scan, and `npm audit`. It also uploads CI artifacts.
 - `CodeQL` runs static security analysis.
 
+Inventory
+- `CI`: triggers `push` (`main`/`master`) and `pull_request`. Job `lint_test` with a Node `20, 22` matrix. Actions: `actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`. Permissions: `contents: read`. Cache: npm cache via `setup-node`. Artifacts: `artifacts/ci-smoke.log`, `artifacts/npm-audit.json`. Timeout: 10 minutes. Concurrency enabled.
+- `CodeQL`: triggers `push`, `pull_request` (same-repo only), and weekly schedule. Job `analyze`. Actions: `actions/checkout@v4`, `github/codeql-action/init@v3`, `github/codeql-action/analyze@v3`. Permissions: `contents: read`, `security-events: write`. Cache: CodeQL internal. Artifacts: none. Timeout: 30 minutes. Concurrency enabled.
 Triggers
 - `CI`: `push` to `main`/`master` and all `pull_request` events.
 - `CodeQL`: `push` to `main`/`master`, `pull_request` from the same repository, and a weekly schedule.
