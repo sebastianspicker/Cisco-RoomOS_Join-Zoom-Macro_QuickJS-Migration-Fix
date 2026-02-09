@@ -72,7 +72,7 @@
 import xapi from 'xapi';
 import { config, sleep, checkRegex, findDTMF, sendDTMF, dialZoom, handleDualScreen } from './JoinZoom_Config_4-1-1'
 import { page } from './JoinZoom_JoinText_4-1-1'
-import { mem, localScriptNameFrom } from './Memory_Functions';
+import { mem, localScriptNameFrom, memoryReady } from './Memory_Functions';
 
 const localScriptName = localScriptNameFrom({
   importMetaUrl: (typeof import.meta !== 'undefined' && import.meta.url) ? import.meta.url : undefined,
@@ -90,6 +90,7 @@ let meetingInfo = {
 }
 
 async function init() {
+    await memoryReady;
     await sleep(5000)
     let message = { 'Init': {} }
     let pmiInfo = {
@@ -197,10 +198,12 @@ xapi.event.on('CallDisconnect', () => {
         xapi.command('CallHistory Get', {
 
         }).then((result) => {
-            let temp = result.Entry[0].CallbackNumber.split('@');
-            if (temp[1] == 'lej.zmeu.us') {
+            const entry = result?.Entry?.[0];
+            if (!entry) return;
+            const temp = entry.CallbackNumber?.split('@');
+            if (temp?.[1] === 'lej.zmeu.us') {
                 xapi.command('CallHistory DeleteEntry', {
-                    CallHistoryId: result.Entry[0].CallHistoryId,
+                    CallHistoryId: entry.CallHistoryId,
                     DeleteConsecutiveDuplicates: 'True'
                 })
             }
@@ -400,7 +403,6 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                                             WidgetId: `joinZoom~${config.version}~Style_New~HostKey~Text`
                                         })
                                     }
-                                    meetingInfo.role = 'host';
                                 } else {
                                     page.confirmation(atob(meetingInfo.meetingid), meetingInfo.role, atob(meetingInfo.passcode), atob(meetingInfo.hostkey))
                                 }
@@ -476,7 +478,7 @@ xapi.event.on('UserInterface Message TextInput Clear', (event) => {
                 if (config.ui.settings.personalMode) {
                     xapi.command('UserInterface Extensions Widget Action', {
                         Type: 'released',
-                        WidgetId: `joinZoom~${config.version}~Style_New~Role`,
+                        WidgetId: `joinZoom~${config.version}~Style_New+Personal~Role`,
                         Value: `joinZoom~${config.version}~Style_New+Personal~Role~Participant`
                     })
                 } else {
@@ -578,7 +580,7 @@ xapi.event.on('UserInterface Message Prompt Response', (event) => {
     }
 })
 
-xapi.event.on('Userinterface Extensions Widget Action', (event) => {
+xapi.event.on('UserInterface Extensions Widget Action', (event) => {
     if (event.Type == 'released') {
         findDTMF(event.WidgetId).then((result) => {
             if (result.source == 'zoomTools') {
@@ -650,7 +652,7 @@ xapi.event.on('Userinterface Extensions Widget Action', (event) => {
                 }
                 break;
             //Personal Mode
-            case 'joinZoom~4-1-1~Style_New+Personal~HostKey~CallPersonalZoom':
+            case `joinZoom~${config.version}~Style_New+Personal~HostKey~CallPersonalZoom`:
                 localMem.read(btoa('PMIInfo')).then((result) => {
                     meetingInfo = {
                         meetingid: result[btoa('MeetingId')],
@@ -663,13 +665,13 @@ xapi.event.on('Userinterface Extensions Widget Action', (event) => {
                     console.warn(e)
                 })
                 break;
-            case 'joinZoom~4-1-1~Style_New+Personal~Store~MeetingId~Enter':
+            case `joinZoom~${config.version}~Style_New+Personal~Store~MeetingId~Enter`:
                 page.personal.meetingId()
                 break;
-            case 'joinZoom~4-1-1~Style_New+Personal~Store~Passcode~Enter':
+            case `joinZoom~${config.version}~Style_New+Personal~Store~Passcode~Enter`:
                 page.personal.passcode()
                 break;
-            case 'joinZoom~4-1-1~Style_New+Personal~Store~HostKey~Enter':
+            case `joinZoom~${config.version}~Style_New+Personal~Store~HostKey~Enter`:
                 page.personal.hostKey()
                 break;
             default:

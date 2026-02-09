@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mem, localScriptNameFrom, importMem, config } from '../Memory_Functions.js';
+import { mem, localScriptNameFrom, importMem, config, memoryReady } from '../Memory_Functions.js';
 import xapi from 'xapi';
 
 test('localScriptNameFrom derives name from url', () => {
@@ -12,6 +12,7 @@ test('localScriptNameFrom derives name from url', () => {
 });
 
 test('mem.for() isolates local scopes without touching mem.localScript', async () => {
+  await memoryReady;
   const a = mem.for('ScriptA');
   const b = mem.for('ScriptB');
 
@@ -23,11 +24,13 @@ test('mem.for() isolates local scopes without touching mem.localScript', async (
 });
 
 test('global read/write works', async () => {
+  await memoryReady;
   await mem.write.global('GlobalKey', 'GlobalVal');
   assert.equal(await mem.read.global('GlobalKey'), 'GlobalVal');
 });
 
 test('importMem awaits macro save operations', async () => {
+  await memoryReady;
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   const originalSave = xapi.Command.Macros.Macro.Save;

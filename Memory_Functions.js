@@ -78,7 +78,12 @@ function parseStoreFromMacroContent (content) {
 
 function getStore () {
   return xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
-    .then((e) => parseStoreFromMacroContent(e.Macro[0].Content));
+    .then((e) => {
+      if (!e?.Macro || !Array.isArray(e.Macro) || e.Macro.length === 0 || !e.Macro[0]?.Content) {
+        return Promise.reject(new Error('Memory store: macro content missing or empty.'));
+      }
+      return parseStoreFromMacroContent(e.Macro[0].Content);
+    });
 }
 
 function saveStore (store) {
@@ -377,11 +382,14 @@ mem.print.scoped = (scopeName) => new Promise((resolve, reject) => {
 /* ------------------------------------------------------------------ */
 /*  6)   INITIAL STARTUP SEQUENCE                                     */
 /* ------------------------------------------------------------------ */
-memoryInit()
+const memoryReady = memoryInit()
   .then(importMem)
-  .catch((e) => console.error(e));
+  .catch((e) => {
+    console.error(e);
+    throw e;
+  });
 
 /* ------------------------------------------------------------------ */
 /*  7)   EXPORT                                                       */
 /* ------------------------------------------------------------------ */
-export { mem, localScriptNameFrom, importMem, config };
+export { mem, localScriptNameFrom, importMem, config, memoryReady };
