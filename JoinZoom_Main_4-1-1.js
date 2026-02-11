@@ -74,6 +74,37 @@ import { config, sleep, checkRegex, findDTMF, sendDTMF, dialZoom, handleDualScre
 import { page } from './JoinZoom_JoinText_4-1-1'
 import { mem, localScriptNameFrom, memoryReady } from './Memory_Functions';
 
+/* btoa/atob polyfill for environments (e.g. QuickJS) that do not provide them */
+if (typeof btoa === 'undefined') {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  globalThis.btoa = (str) => {
+    let s = String(str);
+    let out = '';
+    for (let i = 0; i < s.length; i += 3) {
+      const a = s.charCodeAt(i);
+      const b = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      const c = i + 2 < s.length ? s.charCodeAt(i + 2) : 0;
+      out += chars[a >>> 2] + chars[((a & 3) << 4) | (b >>> 4)] + (i + 1 < s.length ? chars[((b & 15) << 2) | (c >>> 6)] : '=') + (i + 2 < s.length ? chars[c & 63] : '=');
+    }
+    return out;
+  };
+}
+if (typeof atob === 'undefined') {
+  globalThis.atob = (str) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let s = String(str).replace(/=+$/, '');
+    let out = '';
+    for (let i = 0; i < s.length; i += 4) {
+      const a = chars.indexOf(s[i]); const b = chars.indexOf(s[i + 1]);
+      const c = chars.indexOf(s[i + 2]); const d = chars.indexOf(s[i + 3]);
+      out += String.fromCharCode((a << 2) | (b >>> 4));
+      if (c !== -1) out += String.fromCharCode(((b & 15) << 4) | (c >>> 2));
+      if (d !== -1) out += String.fromCharCode(((c & 3) << 6) | d);
+    }
+    return out;
+  };
+}
+
 const localScriptName = localScriptNameFrom({
   importMetaUrl: (typeof import.meta !== 'undefined' && import.meta.url) ? import.meta.url : undefined,
   moduleName: (typeof module !== 'undefined' && module.name) ? module.name : undefined,
@@ -91,8 +122,18 @@ let meetingInfo = {
 
 async function init() {
     await memoryReady;
+    const message = { 'Init': {} };
+    if (typeof config === 'undefined' || !config?.version || !config?.ui?.settings) {
+        console.error('JoinZoom: config missing or invalid.');
+        message.Init.error = 'config missing';
+        return message;
+    }
+    if (typeof page === 'undefined' || typeof page.meetingID !== 'function') {
+        console.error('JoinZoom: page (JoinText) missing or invalid.');
+        message.Init.error = 'page missing';
+        return message;
+    }
     await sleep(5000)
-    let message = { 'Init': {} }
     let pmiInfo = {
         "TWVldGluZ0lk": "",
         "UGFzc2NvZGU=": "",
@@ -135,24 +176,20 @@ async function init() {
             })
         })
     } else {
-        await sleep().then(() => {
-            message.Init.PersonalMode['Enabled'] = false;
-            message.Init.PersonalMode['isSet?'] = false;
-            mem.remove.global(localScriptName).then(() => {
-
-            }).catch((e) => {
-                console.debug(e)
-            })
-        })
+        message.Init.PersonalMode['Enabled'] = false;
+        message.Init.PersonalMode['isSet?'] = false;
+        await mem.remove.global(localScriptName).catch((e) => {
+            console.debug(e);
+        });
     }
-    return new Promise((resolve) => {
-        resolve(message)
-    })
+    return message;
 }
 
 init().then((message) => {
-    console.info(message, `init Complete. Script ready for use.`)
-})
+    console.info(message, `init Complete. Script ready for use.`);
+}).catch((e) => {
+    console.error('JoinZoom init failed:', e);
+});
 
 function zoomToolsVisibility(visibility) {
     if (config.ui.settings.dtmfTools) {
@@ -232,7 +269,7 @@ xapi.event.on('UserInterface Extensions Panel Clicked', (event) => {
                                 "SG9zdEtleQ==": response["SG9zdEtleQ=="]
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
-                        })
+                        }).catch((e) => { console.debug(e); })
                         xapi.command('UserInterface Extensions Panel Open', {
                             PanelId: `joinZoom~${config.version}~Style_New+Personal`
                         })
@@ -303,8 +340,11 @@ xapi.event.on('UserInterface Extensions Panel Clicked', (event) => {
 })
 
 xapi.event.on('UserInterface Message TextInput Response', (event) => {
-    let x = event.FeedbackId.split('~')
-    let feedbackVersion = x[0]
+    if (!event?.FeedbackId || typeof event.FeedbackId !== 'string') return;
+    const x = event.FeedbackId.split('~');
+    if (x.length < 3) return;
+    const feedbackVersion = x[0];
+    const text = event.Text ?? '';
     let pmiInfo = {
         "TWVldGluZ0lk": "",
         "UGFzc2NvZGU=": "",
@@ -316,26 +356,26 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
     if (feedbackVersion == "join_zoom_v_" + config.version) {
         switch (page.number) {
             case '01':
-                checkRegex(event.Text, 'meetingid').then((check) => {
+                checkRegex(text, 'meetingid').then((check) => {
                     if (check) {
-                        meetingInfo.meetingid = btoa(event.Text);
+                        meetingInfo.meetingid = btoa(text);
                         switch (page.type) {
                             case 'opr':
                             case 'err':
                                 if (config.ui.settings.style == 'new') {
                                     if (config.ui.settings.personalMode) {
                                         xapi.command('UserInterface Extensions Widget SetValue', {
-                                            Value: event.Text,
+                                            Value: text,
                                             WidgetId: `joinZoom~${config.version}~Style_New+Personal~MeetingId~Text`
                                         })
                                     } else {
                                         xapi.command('UserInterface Extensions Widget SetValue', {
-                                            Value: event.Text,
+                                            Value: text,
                                             WidgetId: `joinZoom~${config.version}~Style_New~MeetingId~Text`
                                         })
                                     }
                                 } else {
-                                    page.role(event.Text)
+                                    page.role(text)
                                 }
                                 break;
                             default:
@@ -348,21 +388,21 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                 })
                 break;
             case '03':
-                checkRegex(event.Text, 'passcode').then((check) => {
+                checkRegex(text, 'passcode').then((check) => {
                     if (check == true) {
-                        meetingInfo.passcode = btoa(event.Text);
+                        meetingInfo.passcode = btoa(text);
                         switch (page.type) {
                             case 'opr':
                             case 'err':
                                 if (config.ui.settings.style == 'new') {
                                     if (config.ui.settings.personalMode) {
                                         xapi.command('UserInterface Extensions Widget SetValue', {
-                                            Value: event.Text,
+                                            Value: text,
                                             WidgetId: `joinZoom~${config.version}~Style_New+Personal~Passcode~Text`
                                         })
                                     } else {
                                         xapi.command('UserInterface Extensions Widget SetValue', {
-                                            Value: event.Text,
+                                            Value: text,
                                             WidgetId: `joinZoom~${config.version}~Style_New~Passcode~Text`
                                         })
                                     }
@@ -370,7 +410,7 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                                     if (meetingInfo.role == 'participant') {
                                         page.confirmation(atob(meetingInfo.meetingid), meetingInfo.role, atob(meetingInfo.passcode), atob(meetingInfo.hostkey))
                                     } else {
-                                        page.hostKey(event.Text)
+                                        page.hostKey(text)
                                     }
                                 }
                                 break;
@@ -384,9 +424,9 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                 })
                 break;
             case '04':
-                checkRegex(event.Text, 'hostkey').then((check) => {
+                checkRegex(text, 'hostkey').then((check) => {
                     if (check == true) {
-                        meetingInfo.hostkey = btoa(event.Text);
+                        meetingInfo.hostkey = btoa(text);
                         switch (page.type) {
                             case 'opr':
                             case 'err':
@@ -394,12 +434,12 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                                     meetingInfo.role = 'host';
                                     if (config.ui.settings.personalMode) {
                                         xapi.command('UserInterface Extensions Widget SetValue', {
-                                            Value: `Host Key: ${event.Text}`,
+                                            Value: `Host Key: ${text}`,
                                             WidgetId: `joinZoom~${config.version}~Style_New+Personal~HostKey~Text`
                                         })
                                     } else {
                                         xapi.command('UserInterface Extensions Widget SetValue', {
-                                            Value: `Host Key: ${event.Text}`,
+                                            Value: `Host Key: ${text}`,
                                             WidgetId: `joinZoom~${config.version}~Style_New~HostKey~Text`
                                         })
                                     }
@@ -422,13 +462,13 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                     case 'err':
                         localMem.read(btoa('PMIInfo')).then((response) => {
                             pmiInfo = {
-                                "TWVldGluZ0lk": btoa(event.Text),
+                                "TWVldGluZ0lk": btoa(text),
                                 "UGFzc2NvZGU=": response["UGFzc2NvZGU="],
                                 "SG9zdEtleQ==": response["SG9zdEtleQ=="]
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
                             localMem.write(btoa('PMIInfo'), pmiInfo)
-                        })
+                        }).catch((e) => { console.debug(e); })
                         break;
                 }
                 break;
@@ -439,12 +479,12 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                         localMem.read(btoa('PMIInfo')).then((response) => {
                             pmiInfo = {
                                 "TWVldGluZ0lk": response["TWVldGluZ0lk"],
-                                "UGFzc2NvZGU=": btoa(event.Text),
+                                "UGFzc2NvZGU=": btoa(text),
                                 "SG9zdEtleQ==": response["SG9zdEtleQ=="]
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
                             localMem.write(btoa('PMIInfo'), pmiInfo)
-                        })
+                        }).catch((e) => { console.debug(e); })
                         break;
                 }
                 break
@@ -456,11 +496,11 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
                             pmiInfo = {
                                 "TWVldGluZ0lk": response["TWVldGluZ0lk"],
                                 "UGFzc2NvZGU=": response["UGFzc2NvZGU="],
-                                "SG9zdEtleQ==": btoa(event.Text)
+                                "SG9zdEtleQ==": btoa(text)
                             }
                             updatePersonalTextbox(pmiInfo['TWVldGluZ0lk'], pmiInfo['UGFzc2NvZGU='], pmiInfo['SG9zdEtleQ=='])
                             localMem.write(btoa('PMIInfo'), pmiInfo)
-                        })
+                        }).catch((e) => { console.debug(e); })
                         break;
                 }
                 break;
@@ -471,8 +511,8 @@ xapi.event.on('UserInterface Message TextInput Response', (event) => {
 })
 
 xapi.event.on('UserInterface Message TextInput Clear', (event) => {
-    if (config.ui.settings.style == 'new') {
-        switch (event.FeedbackId) {
+    if (!event?.FeedbackId || config?.ui?.settings?.style != 'new') return;
+    switch (event.FeedbackId) {
             case `join_zoom_v_${config.version}~04~opr`:
             case `join_zoom_v_${config.version}~04~err`:
                 if (config.ui.settings.personalMode) {
@@ -491,15 +531,16 @@ xapi.event.on('UserInterface Message TextInput Clear', (event) => {
                 break;
             default:
                 break;
-        }
     }
 })
 
 xapi.event.on('UserInterface Message Prompt Response', (event) => {
-    let x = event.FeedbackId.split('~')
-    let feedbackVersion = x[0]
+    if (!event?.FeedbackId || typeof event.FeedbackId !== 'string') return;
+    const x = event.FeedbackId.split('~');
+    if (x.length < 3) return;
+    const feedbackVersion = x[0];
     page.number = x[1];
-    page.type = x[2]
+    page.type = x[2];
     console.debug('Scope: ', page.number, page.type)
     if (feedbackVersion == "join_zoom_v_" + config.version) {
         switch (page.number) {
@@ -583,7 +624,7 @@ xapi.event.on('UserInterface Message Prompt Response', (event) => {
 xapi.event.on('UserInterface Extensions Widget Action', (event) => {
     if (event.Type == 'released') {
         findDTMF(event.WidgetId).then((result) => {
-            if (result.source == 'zoomTools') {
+            if (result?.source == 'zoomTools') {
                 console.debug(`"${result.nickName}" released, entering DTMF.`)
                 switch (config.ui.settings.dtmfFeedback.mode) {
                     case 'On':
@@ -598,7 +639,7 @@ xapi.event.on('UserInterface Extensions Widget Action', (event) => {
                         break;
                 }
             }
-        });
+        }).catch(() => {});
         switch (event.WidgetId) {
             case `joinZoom~${config.version}~Style_New~MeetingId~Enter`:
             case `joinZoom~${config.version}~Style_New+Personal~MeetingId~Enter`:
@@ -654,15 +695,22 @@ xapi.event.on('UserInterface Extensions Widget Action', (event) => {
             //Personal Mode
             case `joinZoom~${config.version}~Style_New+Personal~HostKey~CallPersonalZoom`:
                 localMem.read(btoa('PMIInfo')).then((result) => {
+                    const mid = result?.[btoa('MeetingId')];
+                    const pwd = result?.[btoa('Passcode')];
+                    const hk = result?.[btoa('HostKey')];
+                    if (mid == null || mid === '' || pwd == null || pwd === '') {
+                        console.warn('CallPersonalZoom: PMIInfo missing or incomplete.');
+                        return;
+                    }
                     meetingInfo = {
-                        meetingid: result[btoa('MeetingId')],
-                        passcode: result[btoa('Passcode')],
-                        hostkey: result[btoa('HostKey')],
+                        meetingid: mid,
+                        passcode: pwd,
+                        hostkey: hk ?? '',
                         role: 'host'
                     }
                     dialZoom(meetingInfo.meetingid, meetingInfo.passcode, meetingInfo.hostkey);
                 }).catch((e) => {
-                    console.warn(e)
+                    console.warn(e);
                 })
                 break;
             case `joinZoom~${config.version}~Style_New+Personal~Store~MeetingId~Enter`:
@@ -687,7 +735,11 @@ function updatePersonalTextbox(id, pass, key) {
         thisKey: "Not Set"
     }
     if (id != '' && id != undefined) {
-        string.thisID = atob(id)
+        try {
+            string.thisID = atob(id);
+        } catch {
+            string.thisID = 'Invalid';
+        }
     }
     if (pass != '' && pass != undefined) {
         string.thisPass = "Set"

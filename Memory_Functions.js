@@ -152,6 +152,9 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
 function importMem () {
   return xapi.Command.Macros.Macro.Get({ Content: 'True' })
     .then((macroList) => {
+      if (!macroList?.Macro || !Array.isArray(macroList.Macro)) {
+        return [];
+      }
 
       /* Regex erkennt bereits vorhandene Imports bzw. localScript-Setzung */
       const importRegex =
@@ -160,6 +163,7 @@ function importMem () {
       const savePromises = [];
 
       macroList.Macro.forEach((m) => {
+        if (!m || m.Content == null) return;
 
         const hasXapi   = /\s*import\s+xapi\s+from\s+'xapi'/.test(m.Content);
         const hasMemImp = /import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'/.test(m.Content);

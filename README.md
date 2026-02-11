@@ -2,6 +2,8 @@
 
 Resolve the `ReferenceError: 'module' is not defined` error on Cisco RoomOS 11.28+ by migrating legacy macros to ES Modules.
 
+> **Note:** Cisco provides an official **Zoom Room Connector / Zoom plugin** for RoomOS devices. For new deployments, prefer using Cisco’s native Zoom integration instead of this community macro. This repository is intended for existing installations that already rely on the Join Zoom macro suite and need a compatibility fix for RoomOS 11.28+ (QuickJS).
+
 ## Overview
 
 RoomOS 11.28 replaced the legacy Duktape runtime with QuickJS and removed CommonJS globals (`module`, `exports`, `require`, `__filename`, ...). Legacy macros that call `module.name` fail to load. This repo provides a safe, backward-compatible fix and a patched `Memory_Functions.js` for Join Zoom 4-1-1.
