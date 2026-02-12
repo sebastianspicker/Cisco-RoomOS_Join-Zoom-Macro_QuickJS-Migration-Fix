@@ -25,7 +25,6 @@ junit-*.xml
 .idea/
 .vscode/
 .cursor/
-.codex/
 
 # docs (local findings/logs/decisions)
 DECISIONS.md

@@ -1,5 +1,7 @@
 # Join-Zoom Macro · QuickJS Migration Fix
 
+**This repository is archived.** See [ARCHIVE.md](ARCHIVE.md) for the archive notice, preserved structure, and validation commands.
+
 Resolve the `ReferenceError: 'module' is not defined` error on Cisco RoomOS 11.28+ by migrating legacy macros to ES Modules.
 
 > **Note:** Cisco provides an official **Zoom Room Connector / Zoom plugin** for RoomOS devices. For new deployments, prefer using Cisco’s native Zoom integration instead of this community macro. This repository is intended for existing installations that already rely on the Join Zoom macro suite and need a compatibility fix for RoomOS 11.28+ (QuickJS).
