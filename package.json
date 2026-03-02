@@ -6,7 +6,8 @@
   "scripts": {
     "lint": "eslint .",
     "test": "node --test",
-    "smoke": "npm run lint && npm test"
+    "smoke": "npm run lint && npm test",
+    "validate": "npm run smoke"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

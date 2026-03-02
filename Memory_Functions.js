@@ -37,7 +37,7 @@ const mem = {};                 // **globale zentrale Ablage** für alle Funktio
 /* ------------------------------------------------------------------ */
 /*  2)   PATCH: localScript-Namen FESTLEGEN (RoomOS ≥ 11.28)          */
 /* ------------------------------------------------------------------ */
-function localScriptNameFrom ({ importMetaUrl, moduleName, fallbackName }) {
+function localScriptNameFrom({ importMetaUrl, moduleName, fallbackName }) {
   if (importMetaUrl) {
     const lastPathSegment = String(importMetaUrl).split('/').pop();
     if (lastPathSegment) {
@@ -50,7 +50,7 @@ function localScriptNameFrom ({ importMetaUrl, moduleName, fallbackName }) {
   return fallbackName || 'UnknownScript';
 }
 
-(function applyLocalScriptName () {
+(function applyLocalScriptName() {
   const importMetaUrl = (typeof import.meta !== 'undefined' && import.meta.url)
     ? import.meta.url
     : undefined;
@@ -66,17 +66,28 @@ function localScriptNameFrom ({ importMetaUrl, moduleName, fallbackName }) {
   });
 })();
 
-function parseStoreFromMacroContent (content) {
-  const start = String(content || '').indexOf('{');
-  if (start < 0) {
-    throw new Error('Memory store parse error: no opening "{" found.');
+/**
+ * Robust JSON extraction from macro content.
+ * Finds the first '{' and the last '}'.
+ */
+function parseStoreFromMacroContent(content) {
+  const c = String(content || '');
+  const start = c.indexOf('{');
+  const end = c.lastIndexOf('}');
+
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error('Memory store parse error: No valid JSON object found.');
   }
 
-  const jsonText = String(content).slice(start).replace(/;?\s*$/, '');
-  return JSON.parse(jsonText);
+  const jsonText = c.slice(start, end + 1);
+  try {
+    return JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error(`Memory store parse error: ${e.message}`);
+  }
 }
 
-function getStore () {
+function getStore() {
   return xapi.Command.Macros.Macro.Get({ Content: 'True', Name: config.storageMacro })
     .then((e) => {
       if (!e?.Macro || !Array.isArray(e.Macro) || e.Macro.length === 0 || !e.Macro[0]?.Content) {
@@ -86,7 +97,7 @@ function getStore () {
     });
 }
 
-function saveStore (store) {
+function saveStore(store) {
   return xapi.Command.Macros.Macro.Save(
     { Name: config.storageMacro },
     `var memory = ${JSON.stringify(store, null, 4)};`
@@ -96,7 +107,7 @@ function saveStore (store) {
 /* ------------------------------------------------------------------ */
 /*  3)   INITIALISIERUNG DES STORAGE-MACROS                           */
 /* ------------------------------------------------------------------ */
-function memoryInit () {
+function memoryInit() {
   /*  Prüfen, ob das Storage-Macro bereits existiert  */
   return xapi.Command.Macros.Macro.Get({ Name: config.storageMacro })
     .then(() => undefined)                   // vorhanden → fertig
@@ -104,7 +115,7 @@ function memoryInit () {
       console.warn(`No storage macro found, creating "${config.storageMacro}" ...`);
 
       const initialContent =
-`var memory = {
+        `var memory = {
     "./_$Info": {
         "Warning": "Do NOT modify this document, as other Scripts/Macros may rely on this information",
         "AvailableFunctions": {
@@ -139,7 +150,7 @@ function memoryInit () {
     noch nicht importiert sind.  Die Zuweisung von localScript nutzt
     **bereits** den neuen ES-Modul-Ansatz und ist damit zukunftssicher.   */
 const importTemplate =
-`import xapi from 'xapi';
+  `import xapi from 'xapi';
 import { mem } from './Memory_Functions';
 
 mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
@@ -149,33 +160,36 @@ mem.localScript = (typeof import.meta !== 'undefined' && import.meta.url)
 
 `;
 
-function importMem () {
+function importMem() {
+  if (config.autoImport.mode === false || config.autoImport.mode === 'false') {
+    return Promise.resolve([]);
+  }
   return xapi.Command.Macros.Macro.Get({ Content: 'True' })
     .then((macroList) => {
       if (!macroList?.Macro || !Array.isArray(macroList.Macro)) {
         return [];
       }
 
-      /* Regex erkennt bereits vorhandene Imports bzw. localScript-Setzung */
+      /* Regex matches only at start of content to avoid replacing inside strings/comments */
       const importRegex =
-        /(\s*import\s+xapi\s+from\s+'xapi'(?:;|\s*)(?:\n|\r)*)?(\s*import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'(?:;|\s*)(?:\n|\r)*)?(\s*mem\.localScript\s*=.*(?:;|\s*))?/;
+        /^(\s*import\s+xapi\s+from\s+'xapi'(?:;|\s*)(?:\n|\r)*)?(\s*import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'(?:;|\s*)(?:\n|\r)*)?(\s*mem\.localScript\s*=.*(?:;|\s*))?/;
 
       const savePromises = [];
 
       macroList.Macro.forEach((m) => {
-        if (!m || m.Content == null) return;
+        if (!m || m.Content === null || m.Content === undefined) return;
 
-        const hasXapi   = /\s*import\s+xapi\s+from\s+'xapi'/.test(m.Content);
+        const hasXapi = /\s*import\s+xapi\s+from\s+'xapi'/.test(m.Content);
         const hasMemImp = /import\s+{\s*mem\s*}\s+from\s+'.\/Memory_Functions'/.test(m.Content);
-        const hasLocal  = /mem\.localScript\s*=/.test(m.Content);
+        const hasLocal = /mem\.localScript\s*=/.test(m.Content);
 
         const needsPatch = !(hasXapi && hasMemImp && hasLocal);
 
         /*   Das eigene Storage-/Utility-Macro NIE patchen,
              sonst droht Rekursion.                                */
         if (!needsPatch ||
-            m.Name === 'Memory_Functions' ||
-            m.Name === config.storageMacro) {
+          m.Name === 'Memory_Functions' ||
+          m.Name === config.storageMacro) {
           return;
         }
 
@@ -194,7 +208,7 @@ function importMem () {
               return config.autoImport.customImport.includes(m.Name);
             case 'customActive':
               return m.Active === 'True' &&
-                     config.autoImport.customImport.includes(m.Name);
+                config.autoImport.customImport.includes(m.Name);
             default:
               console.error(`Configuration Error: autoImport.mode "${config.autoImport.mode}" unknown – defaulting to "false".`);
               return false;
@@ -215,7 +229,10 @@ function importMem () {
 
       return Promise.all(savePromises);
     })
-    .catch((e) => console.error(e));
+    .catch((e) => {
+      console.error(e);
+      throw e;
+    });
 }
 
 /* ------------------------------------------------------------------ */
@@ -252,7 +269,7 @@ mem.write.global = (key, value) => new Promise((resolve) => {
       return saveStore(store);
     })
     .then(() => {
-      console.debug(`Global Write: ${key} = ${value}`);
+      console.debug(`Global Write: ${key}`);
       resolve(value);
     });
 });
@@ -269,11 +286,10 @@ mem.remove.global = (key) => new Promise((resolve, reject) => {
         return;
       }
 
-      const oldVal = store[key];
       delete store[key];
 
       return saveStore(store).then(() => {
-        console.warn(`Global key "${key}" (${oldVal}) deleted.`);
+        console.warn(`Global key "${key}" deleted.`);
         resolve(key);
       });
     })
@@ -343,7 +359,7 @@ mem.write.scoped = (key, value, scopeName) => new Promise((resolve, reject) => {
       store[scopeKey] = scope;
 
       return saveStore(store).then(() => {
-        console.debug(`Local Write: [${scopeKey}] ${key} = ${value}`);
+        console.debug(`Local Write: [${scopeKey}] ${key}`);
         resolve(value);
       });
     })
@@ -364,12 +380,11 @@ mem.remove.scoped = (key, scopeName) => new Promise((resolve, reject) => {
         return;
       }
 
-      const oldVal = scope[key];
       delete scope[key];
       store[scopeKey] = scope;
 
       return saveStore(store).then(() => {
-        console.warn(`Local key "${key}" (${oldVal}) deleted from ${scopeKey}.`);
+        console.warn(`Local key "${key}" deleted from ${scopeKey}.`);
         resolve(key);
       });
     })

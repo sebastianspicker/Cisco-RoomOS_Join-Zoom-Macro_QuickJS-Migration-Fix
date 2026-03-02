@@ -8,7 +8,64 @@ Resolve the `ReferenceError: 'module' is not defined` error on Cisco RoomOS 11.2
 
 ## Overview
 
-RoomOS 11.28 replaced the legacy Duktape runtime with QuickJS and removed CommonJS globals (`module`, `exports`, `require`, `__filename`, ...). Legacy macros that call `module.name` fail to load. This repo provides a safe, backward-compatible fix and a patched `Memory_Functions.js` for Join Zoom 4-1-1.
+RoomOS 11.28 replaced the legacy Duktape runtime with QuickJS and removed CommonJS globals (`module`, `exports`, `require`, `__filename`, ...). Legacy macros that call `module.name` fail to load. This repo provides a safe, backward-compatible fix and a patched `Memory_Functions.js` for Join Zoom 4-1-1. The tracked files are release-ready; local artifacts (e.g. `FINDINGS.md`) are gitignored and not part of the release. See [ARCHIVE.md](ARCHIVE.md) for the canonical file list.
+
+## How it works
+
+The Join Zoom macro suite is made of several pieces: the main macro drives the UI and call flow; the Config macro supplies dial logic, regex, and settings; the JoinText macro supplies prompts and copy; Memory_Functions provides scoped and global persistent storage; and the Memory_Storage macro (created by Memory_Functions if missing) holds the stored data. The main macro imports Config, JoinText, and Memory_Functions, and uses the RoomOS `xapi` for UI and placing calls.
+
+```mermaid
+flowchart TB
+  subgraph macros [Macros]
+    Main[JoinZoom_Main]
+    Config[JoinZoom_Config]
+    JoinText[JoinZoom_JoinText]
+  end
+  subgraph storage [Storage]
+    MemFn[Memory_Functions]
+    MemStore[Memory_Storage]
+  end
+  xapi[RoomOS xapi]
+  Main -->|imports| Config
+  Main -->|imports| JoinText
+  Main -->|imports| MemFn
+  Main -->|UI and Call| xapi
+  Main -->|validation error| UiFail[Show error prompt]
+  UiFail -->|retry input| Main
+  MemFn -->|read/write via Macro.Get/Save| MemStore
+  MemFn -->|storage missing| StoreRecreate[Create Memory_Storage]
+  StoreRecreate --> MemStore
+  MemFn --> xapi
+```
+
+The main macro imports config/text/memory helpers and drives RoomOS UI plus call placement through `xapi`. Validation errors (meeting ID, passcode, or role) stay in the prompt flow until corrected, instead of proceeding to dial. Memory storage failures are handled by recreating the storage macro path before continuing normal reads/writes.
+
+## Lifecycle
+
+Startup runs in order: RoomOS loads macros; Memory_Functions sets `mem.localScript` (from `import.meta.url` or `module.name` fallback), then runs `memoryInit()` (ensures the Memory_Storage macro exists), then `importMem()` if enabled (patches other macros’ imports). When the `memoryReady` promise resolves, JoinZoom_Main’s `init()` runs: it validates config and page, sleeps 5s, registers call detection and Zoom Tools visibility, applies JoinWebex config, and reads or initializes PMI. Event listeners (Panel Clicked, TextInput, Prompt, Widget Action, Call status, CallDisconnect) are registered at load and are active once init has run.
+
+```mermaid
+flowchart TB
+  Load[RoomOS loads macros]
+  SetLocal[Memory_Functions sets mem.localScript]
+  MemInit[memoryInit: ensure Memory_Storage exists]
+  ImportMem[importMem: optional patch other macros]
+  Ready[memoryReady resolves]
+  Init[Main init: config check, sleep, detectCall, PMI]
+  Listeners[Listeners active]
+  InitError[Init validation failure]
+  Recovery[Retry after config fix]
+  Load --> SetLocal
+  SetLocal --> MemInit
+  MemInit --> ImportMem
+  ImportMem --> Ready
+  Ready --> Init
+  Init --> Listeners
+  Init -->|missing config/page| InitError
+  InitError --> Recovery --> Init
+```
+
+Lifecycle execution begins at macro load, prepares memory compatibility, then enables UI/event listeners once init succeeds. If init validation fails, execution follows an explicit recovery path and retries after config correction. During runtime, panel and prompt events gather meeting info; widget actions trigger `dialZoom()`, and disconnect events reset state for the next call.
 
 ## Features
 
@@ -92,7 +149,7 @@ These are part of the original Cisco DevNet Join Zoom macro suite. Download them
 Install dependencies:
 
 ```bash
-npm ci
+npm ci --include=dev
 ```
 
 Lint:
