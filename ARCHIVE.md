@@ -1,6 +1,8 @@
 # Repository archive notice
 
-This repository is **archived**. It is read-only and no longer actively maintained. The code and documentation are preserved for reference and for existing deployments that use this QuickJS migration fix.
+This repository is **archived** as of **May 2025**. It is read-only and no longer actively maintained.
+
+**Reason:** Cisco now provides native Zoom integration (OBTP via Hybrid Calendar, Zoom Rooms Connector) that supersedes community macros. This repository is preserved for reference and for existing deployments that still rely on the QuickJS migration fix.
 
 ---
 

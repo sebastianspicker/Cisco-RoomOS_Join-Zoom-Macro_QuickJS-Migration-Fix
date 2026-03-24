@@ -144,6 +144,16 @@ These are part of the original Cisco DevNet Join Zoom macro suite. Download them
 - `Memory_Functions.js` supports `config.autoImport` to inject required imports into other macros.
 - `JoinZoom_Main_4-1-1.js` configuration lives in `JoinZoom_Config_4-1-1` (external).
 
+## Alternatives & Successors
+
+> This project is archived. Consider these actively maintained alternatives:
+
+| Project | Description | Link |
+|---------|-------------|------|
+| Cisco OBTP | Native One Button to Push integration via Hybrid Calendar | [Cisco Docs](https://www.cisco.com/c/en/us/td/docs/voice_ip_comm/cloudCollaboration/spark/hybridservices/calendarservice) |
+| Zoom Rooms Connector | Official Zoom integration for Cisco endpoints | [Zoom Support](https://support.zoom.us/hc/en-us/articles/360023724531) |
+| Webex Zoom CRC | Cloud-registered Cisco devices with Zoom interop | [Webex](https://www.webex.com) |
+
 ## Development
 
 Install dependencies:
